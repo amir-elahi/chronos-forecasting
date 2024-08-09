@@ -558,3 +558,45 @@ class ChronosPipeline:
             tokenizer=chronos_config.create_tokenizer(),
             model=ChronosModel(config=chronos_config, model=inner_model),
         )
+
+    def get_context_input_transform(self, context: Union[torch.Tensor, List[torch.Tensor]]
+                                    ) -> Tuple[torch.Tensor, Any]:
+        
+        context_tensor = self._prepare_and_validate_context(context=context)
+        token_ids, attention_mask, scale = (
+            self.tokenizer.context_input_transform(context_tensor)
+        )
+
+        tokens = self.tokenizer.output_transform(
+                token_ids.to(scale.device), scale
+            )
+
+
+        return token_ids, attention_mask, tokens
+    
+
+    def get_attention_scores(self, context: Union[torch.Tensor, List[torch.Tensor]]
+                                    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        
+        context_tensor = self._prepare_and_validate_context(context=context)
+        token_ids, attention_mask, tokenizer_state = (
+            self.tokenizer.context_input_transform(context_tensor)
+        )
+
+        # Create dummy decoder input ids (e.g., same length as input_ids)
+        decoder_input_ids = torch.zeros_like(token_ids)
+
+        with torch.no_grad():
+            outputs = self.model.model(
+                input_ids=token_ids.to(self.model.device),
+                attention_mask=attention_mask.to(self.model.device),
+                decoder_input_ids=decoder_input_ids.to(self.model.device),
+                output_attentions=True
+            )
+
+            encoder_attentions = outputs.encoder_attentions
+            decoder_attentions = outputs.decoder_attentions
+            cross_attentions = outputs.cross_attentions
+            encoder_last_hidden_state = outputs.encoder_last_hidden_state
+
+        return encoder_attentions, decoder_attentions, cross_attentions, encoder_last_hidden_state
