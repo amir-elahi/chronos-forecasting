@@ -1,5 +1,5 @@
 training_data_paths:
-- "/home/lsmo/Desktop/Files/1st Year/Project/chronos-forecasting/scripts/passengers.arrow"
+- "/mnt/DATA/Storage/Files/1st Year/Project/chronos-forecasting/scripts/kernelsynth-data.arrow"
 probability:
 - 1.0
 context_length: 512
@@ -10,7 +10,7 @@ save_steps: 100_000
 log_steps: 500
 per_device_train_batch_size: 32
 learning_rate: 0.001
-optim: adamw_torch_fused
+optim: adamw_torch
 num_samples: 20
 shuffle_buffer_length: 100_000
 gradient_accumulation_steps: 1
