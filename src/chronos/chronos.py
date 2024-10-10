@@ -572,7 +572,24 @@ class ChronosPipeline:
             )
 
 
-        return token_ids, attention_mask, tokens
+        return token_ids, attention_mask, tokens, scale
+    
+
+    def get_output_transform(self, samples: torch.Tensor, scale: torch.Tensor
+                            ) -> torch.Tensor:
+        
+        self.centers = torch.linspace(
+            -15,
+            15,
+            self.model.config.n_tokens - self.model.config.n_special_tokens - 1,
+        )
+        scale_unsqueezed = scale.unsqueeze(-1).unsqueeze(-1)
+        indices = torch.clamp(
+            samples - self.model.config.n_special_tokens - 1,
+            min=0,
+            max=len(self.centers) - 1,
+        )
+        return self.centers[indices] * scale_unsqueezed
     
 
     def get_attention_scores(self, context: Union[torch.Tensor, List[torch.Tensor]]
