@@ -17,9 +17,11 @@ from typing import List, Iterator, Optional, Dict
 import typer
 from typer_config import use_yaml_config
 import numpy as np
+import pandas as pd
+import yaml
 import torch
 import torch.distributed as dist
-from torch.utils.data import IterableDataset, get_worker_info
+from torch.utils.data import IterableDataset, get_worker_info, Dataset
 import transformers
 from transformers import (
     AutoModelForSeq2SeqLM,
@@ -45,6 +47,10 @@ from gluonts.transform import (
 )
 
 from chronos import ChronosConfig, ChronosTokenizer
+
+from modify_model import CustomT5
+
+# TODO: Implement checking for enough observations in multi-variate mode
 
 
 app = typer.Typer(pretty_exceptions_enable=False)
@@ -259,6 +265,195 @@ class ShuffleMixin:
 
     def shuffle(self, shuffle_buffer_length: int = 100):
         return PseudoShuffledIterableDataset(self, shuffle_buffer_length)
+
+
+class ChannelDataset(IterableDataset, ShuffleMixin):
+    def __init__(
+        self,
+        datasets: List[list],
+        probabilities: List[float],
+        tokenizer: ChronosTokenizer,
+        context_length: int = 512,
+        prediction_length: int = 64,
+        drop_prob: float = 0.2,
+        min_past: Optional[int] = None,
+        np_dtype=np.float32,
+    ) -> None:
+
+        super().__init__()
+
+        for dataset in datasets:
+            assert isinstance(dataset, list)
+            assert len(dataset) == 3
+
+        assert len(datasets) == len(probabilities)
+
+        self.datasets = datasets
+        self.probabilities = probabilities
+        self.tokenizer = tokenizer
+        self.drop_prob = drop_prob
+        self.prediction_length = prediction_length
+        self.context_length = context_length
+        self.np_dtype = np_dtype
+        self.min_past = min_past or prediction_length
+
+    def Tensor2dict(self, entry: torch.Tensor) -> dict:
+        start = pd.Period("2000-01-01 00:00", freq="h")
+        target = entry[0, :]
+        return {"start": start, "target": target}
+
+    def preprocess_entry(self, entry: dict) -> dict:
+        entry = {f: entry[f] for f in ["start", "target"]}
+        entry["target"] = np.asarray(entry["target"], dtype=self.np_dtype)
+        assert entry["target"].ndim == 1, f"got {entry['target'].ndim=}, expected 1"
+
+        if self.drop_prob > 0:
+            target = entry["target"].copy()
+            drop_p = np.random.uniform(low=0.0, high=self.drop_prob)
+            mask = np.random.choice(
+                [True, False], size=len(target), p=[drop_p, 1 - drop_p]
+            )
+            target[mask] = np.nan
+            entry["target"] = target
+
+        return entry
+
+    def _create_instance_splitter(self):
+
+        instance_sampler = {
+            "training": ExpectedNumInstanceSampler(
+                num_instances=1.0,
+                min_instances=1,
+                min_past=self.min_past,
+                min_future=self.prediction_length,
+            )
+        }["training"]
+
+        return InstanceSplitter(
+            target_field="target",
+            is_pad_field="is_pad",
+            start_field="start",
+            forecast_start_field="forecast_start",
+            instance_sampler=instance_sampler,
+            past_length=self.context_length,
+            future_length=self.prediction_length,
+            dummy_value=np.nan,
+        )
+
+    def create_training_data(self, data):
+        data = Cyclic([data])
+        split_transform = self._create_instance_splitter(
+        ) + FilterTransformation(
+            condition=lambda entry: (~np.isnan(entry["past_target"])).sum() > 0
+        )
+        data = split_transform.apply(data, is_train=True)
+        return data
+
+    def process_context(
+        self,
+        context: dict,
+        past_target: np.ndarray,
+        future_target: np.ndarray,
+        start: pd.Period,
+        forecast_start: pd.Period,
+        past_is_pad: np.ndarray
+    ) -> dict:
+
+        context_copy = context.copy()
+
+        start_index_difference = (start - context_copy["start"]).n
+        forecast_index_difference = (forecast_start - context_copy["start"]).n
+        context_copy['past_target'] = context_copy['target'][start_index_difference:forecast_index_difference]
+
+        if len(context_copy['past_target']) < self.context_length:
+            context_copy['past_target'] = np.concatenate(
+                [np.full(self.context_length - len(context_copy['past_target']), np.nan), context_copy['past_target']]
+            )
+
+        context_copy['past_target'] = np.asarray(context_copy['past_target'], dtype=self.np_dtype)
+
+        context_copy["start"] = start
+        context_copy["future_target"] = context_copy["target"][forecast_index_difference: forecast_index_difference + self.prediction_length]
+        context_copy["future_target"] = np.asarray(context_copy["future_target"], dtype=self.np_dtype)
+
+        context_copy["past_is_pad"] = past_is_pad
+        context_copy["forecast_start"] = forecast_start
+        context_copy.pop("target")
+
+        return context_copy
+
+    def to_hf_format(self, entry: dict, context: List[dict] = None) -> dict:
+        past_target = torch.tensor(entry["past_target"]).unsqueeze(0)
+        input_ids, attention_mask, scale = self.tokenizer.context_input_transform(
+            past_target
+        )
+
+        future_target = torch.tensor(entry["future_target"]).unsqueeze(0)
+        labels, labels_mask = self.tokenizer.label_input_transform(future_target, scale)
+        labels[labels_mask == 0] = -100
+
+        assert context is not None
+        assert len(context) == 2
+
+        for i in range(len(context)):
+            context_processed = self.process_context(context[i], **entry)
+            past_target_context = torch.tensor(context_processed["past_target"]).unsqueeze(0)
+            input_ids_context, attention_mask_context, scale_context = self.tokenizer.context_input_transform(
+                past_target_context
+            )
+
+            future_target_context = torch.tensor(context_processed["future_target"]).unsqueeze(0)
+            labels_context, labels_mask_context = self.tokenizer.label_input_transform(future_target_context, scale_context)
+            labels_context[labels_mask_context == 0] = -100
+
+            input_ids = torch.cat((input_ids, input_ids_context), dim=0)
+            attention_mask = torch.cat((attention_mask, attention_mask_context), dim=0)
+            labels = torch.cat((labels, labels_context), dim=0)
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+
+    def __iter__(self) -> Iterator:
+        dict_datasets = [
+            [
+                map(self.Tensor2dict, dataset)] for dataset in self.datasets
+        ]
+
+        preprocessed_datasets = [
+            list(map(self.preprocess_entry, dataset[0])) for dataset in dict_datasets
+        ]
+
+        iterables = [
+            self.create_training_data(dataset[0]) for dataset in preprocessed_datasets
+        ]
+
+        worker_info = get_worker_info()
+        if worker_info is None:
+            probs = list(self.probabilities)
+        else:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+            iterables = list(itertools.islice(iterables, worker_id, None, num_workers))
+            probs = list(
+                itertools.islice(self.probabilities, worker_id, None, num_workers)
+            )
+
+        probs = [prob / sum(probs) for prob in probs]
+
+        iterators = list(map(iter, iterables))
+
+        while True:
+            idx = np.random.choice(range(len(iterators)), p=probs)
+            try:
+                yield self.to_hf_format(next(iterators[idx]), context=preprocessed_datasets[idx][1:])
+            except StopIteration:
+                probs[idx] = 0
+                if sum(probs) == 0:
+                    return
+                probs = [prob / sum(probs) for prob in probs]
 
 
 class ChronosDataset(IterableDataset, ShuffleMixin):
@@ -499,10 +694,24 @@ class ChronosDataset(IterableDataset, ShuffleMixin):
                 yield self.to_hf_format(entry)
 
 
+class LazyTensorDataset(Dataset):
+    def __init__(self, datasets):
+        self.datasets = datasets  # List of lists of file paths
+
+    def __len__(self):
+        return len(self.datasets)
+
+    def __getitem__(self, index):
+        # Load tensors from file paths for the specific index
+        inner_list = self.datasets[index]
+        return [torch.load(path, weights_only=True) for path in inner_list]
+
+
 @app.command()
 @use_yaml_config(param_name="config")
 def main(
     training_data_paths: str,
+    multi_variate: bool = False,
     probability: Optional[str] = None,
     context_length: int = 512,
     prediction_length: int = 64,
@@ -555,12 +764,26 @@ def main(
     if seed is None:
         seed = random.randint(0, 2**32)
 
+    log_on_main("Multi-variate mode: " + str(multi_variate), logger)
     log_on_main(f"Using SEED: {seed}", logger)
     transformers.set_seed(seed=seed)
 
     raw_training_config = deepcopy(locals())
     output_dir = Path(output_dir)
-    training_data_paths = ast.literal_eval(training_data_paths)
+
+    if multi_variate:
+        # Convert the string representation of the list of lists into a proper Python list
+        training_data_paths = yaml.safe_load(training_data_paths)
+
+        # Ensure that training_data_paths is now a list of lists
+        assert isinstance(training_data_paths, list), "Expected a list of lists for training_data_paths."
+        assert all(isinstance(i, list) for i in training_data_paths), "Each item in training_data_paths should be a list."
+        assert model_type == "seq2seq"
+        assert all(len(sublist) == per_device_train_batch_size for sublist in training_data_paths), \
+            f"Each sublist in training_data_paths must have exactly {per_device_train_batch_size} elements."
+    else:
+        training_data_paths = ast.literal_eval(training_data_paths)
+
     assert isinstance(training_data_paths, list)
 
     if isinstance(probability, str):
@@ -589,29 +812,49 @@ def main(
         logger,
     )
 
-    train_datasets = [
-        Filter(
-            partial(
-                has_enough_observations,
-                min_length=min_past + prediction_length,
-                max_missing_prop=max_missing_prop,
-            ),
-            FileDataset(path=Path(data_path), freq="h"),
-        )
-        for data_path in training_data_paths
-    ]
+    if multi_variate:
+        train_datasets = LazyTensorDataset(training_data_paths)
+    else:
+        train_datasets = [
+            Filter(
+                partial(
+                    has_enough_observations,
+                    min_length=min_past + prediction_length,
+                    max_missing_prop=max_missing_prop,
+                ),
+                FileDataset(path=Path(data_path), freq="h"),
+            )
+            for data_path in training_data_paths
+        ]
 
     log_on_main("Initializing model", logger)
 
-    model = load_model(
-        model_id=model_id,
-        model_type=model_type,
-        vocab_size=n_tokens,
-        random_init=random_init,
-        tie_embeddings=tie_embeddings,
-        pad_token_id=pad_token_id,
-        eos_token_id=eos_token_id,
-    )
+    if multi_variate:
+        assert model_id in [
+            "amazon/chronos-t5-tiny",
+            "amazon/chronos-t5-mini",
+            "amazon/chronos-t5-small",
+            "amazon/chronos-t5-base",
+            "amazon/chronos-t5-large",
+        ]
+
+        model = CustomT5.from_pretrained(
+            model_id=model_id,
+            num_channels=per_device_train_batch_size,
+            batch_size=1
+        )
+
+        model.require_grad(channel_attention=True, Rest=False)
+    else:
+        model = load_model(
+            model_id=model_id,
+            model_type=model_type,
+            vocab_size=n_tokens,
+            random_init=random_init,
+            tie_embeddings=tie_embeddings,
+            pad_token_id=pad_token_id,
+            eos_token_id=eos_token_id,
+        )
 
     chronos_config = ChronosConfig(
         tokenizer_class=tokenizer_class,
@@ -633,17 +876,27 @@ def main(
     # Add extra items to model config so that it's saved in the ckpt
     model.config.chronos_config = chronos_config.__dict__
 
-    shuffled_train_dataset = ChronosDataset(
-        datasets=train_datasets,
-        probabilities=probability,
-        tokenizer=chronos_config.create_tokenizer(),
-        context_length=context_length,
-        prediction_length=prediction_length,
-        min_past=min_past,
-        model_type=model_type,
-        imputation_method=LastValueImputation() if model_type == "causal" else None,
-        mode="training",
-    ).shuffle(shuffle_buffer_length=shuffle_buffer_length)
+    if multi_variate:
+        shuffled_train_dataset = ChannelDataset(
+            datasets=train_datasets,
+            probabilities=probability,
+            tokenizer=chronos_config.create_tokenizer(),
+            context_length=context_length,
+            prediction_length=prediction_length,
+            min_past=min_past,
+        )
+    else:
+        shuffled_train_dataset = ChronosDataset(
+            datasets=train_datasets,
+            probabilities=probability,
+            tokenizer=chronos_config.create_tokenizer(),
+            context_length=context_length,
+            prediction_length=prediction_length,
+            min_past=min_past,
+            model_type=model_type,
+            imputation_method=LastValueImputation() if model_type == "causal" else None,
+            mode="training",
+        ).shuffle(shuffle_buffer_length=shuffle_buffer_length)
 
     # Define training args
     training_args = TrainingArguments(

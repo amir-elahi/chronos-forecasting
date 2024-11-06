@@ -2,9 +2,9 @@ import subprocess
 
 # Define the command as a list of arguments
 command = [
-    "python", "scripts/training/train.py",
+    "/mnt/DATA/Conda_Envs/procGen/bin/python", "scripts/training/train.py",
     "--config", "./scripts/training/configs/chronos-t5-tiny.yaml",
-    "--model-id", "amazon/chronos-t5-small",
+    "--model-id", "amazon/chronos-t5-tiny",
     "--no-random-init",
     "--max-steps", "1000",
     "--learning-rate", "0.001"

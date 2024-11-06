@@ -1,14 +1,16 @@
 training_data_paths:
-- "/mnt/DATA/Storage/Files/1st Year/Project/chronos-forecasting/scripts/kernelsynth-data.arrow"
+# - "/mnt/DATA/Storage/Files/1st Year/Project/chronos-forecasting/trainingData/contextTarget.pt"
+- ['./trainingData/context1.pt', './trainingData/context1.pt', './trainingData/context1.pt']
 probability:
 - 1.0
 context_length: 512
 prediction_length: 64
+multi_variate: true
 min_past: 60
 max_steps: 200_000
 save_steps: 100_000
 log_steps: 500
-per_device_train_batch_size: 32
+per_device_train_batch_size: 3
 learning_rate: 0.001
 optim: adamw_torch
 num_samples: 20
