@@ -5,6 +5,7 @@ import os
 # TODO: Check if the weights are copied correctly: Done but double check
 # TODO: Make it work for all the amazon model sizes: Done but double check
 # TODO: Make it work for the T5 models
+# TODO: Make it work for random initialization of weights. 
 
 
 # Define a new layer type for Channel Attention
