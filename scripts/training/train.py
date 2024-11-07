@@ -19,6 +19,7 @@ from typer_config import use_yaml_config
 import numpy as np
 import pandas as pd
 import yaml
+import h5py
 import torch
 import torch.distributed as dist
 from torch.utils.data import IterableDataset, get_worker_info, Dataset
@@ -695,16 +696,19 @@ class ChronosDataset(IterableDataset, ShuffleMixin):
 
 
 class LazyTensorDataset(Dataset):
-    def __init__(self, datasets):
-        self.datasets = datasets  # List of lists of file paths
+    def __init__(self, file_path):
+        self.file_path = file_path
 
     def __len__(self):
-        return len(self.datasets)
+        with h5py.File(self.file_path, 'r') as f:
+            return len(f)  # Number of datasets stored in the HDF5 file
 
     def __getitem__(self, index):
-        # Load tensors from file paths for the specific index
-        inner_list = self.datasets[index]
-        return [torch.load(path, weights_only=True) for path in inner_list]
+        with h5py.File(self.file_path, 'r') as f:
+            dataset_name = f"dataset_{index}"
+            data = f[dataset_name][()]  # Load the tensor array for the given dataset
+            # Convert the array into a list of tensors
+            return [torch.tensor(item) for item in data]
 
 
 @app.command()
