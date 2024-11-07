@@ -1,12 +1,12 @@
 from transformers import T5ForConditionalGeneration
-from transformers.models.t5.modeling_t5 import T5LayerSelfAttention  # Import this
+from transformers.models.t5.modeling_t5 import T5LayerSelfAttention
 import os
 
 # TODO: Check if the weights are copied correctly: Done but double check
 # TODO: Make it work for all the amazon model sizes: Done but double check
 # TODO: Make it work for the T5 models
-# TODO: Make it work for random initialization of weights. 
-#! Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
+# TODO: Make it work for random initialization of weights.
+# !Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
 
 
 # Define a new layer type for Channel Attention

@@ -18,7 +18,6 @@ import typer
 from typer_config import use_yaml_config
 import numpy as np
 import pandas as pd
-import yaml
 import h5py
 import torch
 import torch.distributed as dist
@@ -52,8 +51,8 @@ from chronos import ChronosConfig, ChronosTokenizer
 from modify_model import CustomT5
 
 # TODO: Implement checking for enough observations in multi-variate mode
-#! Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
-
+# !Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
+# !Think about this line of code: probability = probability * len(train_datasets) and check it it is correct.
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
@@ -272,7 +271,7 @@ class ShuffleMixin:
 class ChannelDataset(IterableDataset, ShuffleMixin):
     def __init__(
         self,
-        datasets: List[list],
+        datasets,
         probabilities: List[float],
         tokenizer: ChronosTokenizer,
         context_length: int = 512,
@@ -288,7 +287,7 @@ class ChannelDataset(IterableDataset, ShuffleMixin):
             assert isinstance(dataset, list)
             assert len(dataset) == 3
 
-        assert len(datasets) == len(probabilities)
+        # assert len(datasets) == len(probabilities)
 
         self.datasets = datasets
         self.probabilities = probabilities
@@ -711,6 +710,11 @@ class LazyTensorDataset(Dataset):
             # Convert the array into a list of tensors
             return [torch.tensor(item) for item in data]
 
+    def __iter__(self):
+        # Define an iterator that yields only `__len__()` items
+        for i in range(self.__len__()):
+            yield self.__getitem__(i)
+
 
 @app.command()
 @use_yaml_config(param_name="config")
@@ -776,18 +780,10 @@ def main(
     raw_training_config = deepcopy(locals())
     output_dir = Path(output_dir)
 
-    if multi_variate:
-        # Convert the string representation of the list of lists into a proper Python list
-        training_data_paths = yaml.safe_load(training_data_paths)
+    training_data_paths = ast.literal_eval(training_data_paths)
 
-        # Ensure that training_data_paths is now a list of lists
-        assert isinstance(training_data_paths, list), "Expected a list of lists for training_data_paths."
-        assert all(isinstance(i, list) for i in training_data_paths), "Each item in training_data_paths should be a list."
+    if multi_variate:
         assert model_type == "seq2seq"
-        assert all(len(sublist) == per_device_train_batch_size for sublist in training_data_paths), \
-            f"Each sublist in training_data_paths must have exactly {per_device_train_batch_size} elements."
-    else:
-        training_data_paths = ast.literal_eval(training_data_paths)
 
     assert isinstance(training_data_paths, list)
 
@@ -812,13 +808,8 @@ def main(
         logger,
     )
 
-    log_on_main(
-        f"Mixing probabilities: {probability}",
-        logger,
-    )
-
     if multi_variate:
-        train_datasets = LazyTensorDataset(training_data_paths)
+        train_datasets = LazyTensorDataset(training_data_paths[0])
     else:
         train_datasets = [
             Filter(
@@ -831,6 +822,13 @@ def main(
             )
             for data_path in training_data_paths
         ]
+
+    probability = probability * len(train_datasets)
+
+    log_on_main(
+        f"Mixing probabilities: {probability}",
+        logger,
+    )
 
     log_on_main("Initializing model", logger)
 

@@ -3,6 +3,7 @@ from src.chronos import ChronosConfig
 from gluonts.dataset.common import FileDataset
 import torch
 from torch.utils.data import Dataset
+import h5py
 
 datasets = ["./scripts/kernelsynth-data.arrow", "./scripts/passengers.arrow"]
 probability = [1, 1]
@@ -59,25 +60,32 @@ print('#' * 10, 'Channel Dataset with Lazy tensor', '#' * 10)
 
 
 class LazyTensorDataset(Dataset):
-    def __init__(self, datasets):
-        self.datasets = datasets  # List of lists of file paths
+    def __init__(self, file_path):
+        self.file_path = file_path
+        with h5py.File(self.file_path, 'r') as f:
+            self.num_datasets = len(f.keys())  # Only count available datasets
+            print("Total datasets:", self.num_datasets)  # Debugging info
 
     def __len__(self):
-        return len(self.datasets)
+        return self.num_datasets  # Number of datasets stored in the HDF5 file
 
     def __getitem__(self, index):
-        # Load tensors from file paths for the specific index
-        inner_list = self.datasets[index]
-        return [torch.load(path, weights_only=True) for path in inner_list]
+        with h5py.File(self.file_path, 'r') as f:
+            dataset_name = f"dataset_{index}"
+            data = f[dataset_name][()]  # Load the tensor array for the given dataset
+            # Convert the array into a list of tensors
+            return [torch.tensor(item) for item in data]
+
+    def __iter__(self):
+        # Define an iterator that yields only `__len__()` items
+        for i in range(self.__len__()):
+            yield self.__getitem__(i)
 
 
 # Step 2: Instantiate the lazy dataset
-datasets = [
-    ["./trainingData/contextTarget.pt", "./trainingData/context1.pt", "./trainingData/context2.pt"],
-    ["./trainingData/context1.pt", "./trainingData/context1.pt", "./trainingData/context1.pt"]
-]
+datasets = "./scripts/MultivariateData.h5"
 
-probability = [0, 1]
+probability = [1, 0, 0, 0, 0]
 
 lazy_tensor_dataset = LazyTensorDataset(datasets)
 

@@ -1,6 +1,5 @@
 training_data_paths:
-# - "/mnt/DATA/Storage/Files/1st Year/Project/chronos-forecasting/trainingData/contextTarget.pt"
-- ['./trainingData/context1.pt', './trainingData/context1.pt', './trainingData/context1.pt']
+- "./scripts/MultivariateData.h5"
 probability:
 - 1.0
 context_length: 512
