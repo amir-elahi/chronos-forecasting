@@ -1,14 +1,16 @@
 training_data_paths:
-- "/mnt/DATA/Storage/Files/1st Year/Project/chronos-forecasting/scripts/kernelsynth-data.arrow"
+- "/home/amir/Projects/procGen/chronos-forecasting/scripts/passengers.arrow"
 probability:
 - 1.0
+train_on_text: false
+train_on_numerical: true
 context_length: 512
 prediction_length: 64
 min_past: 60
 max_steps: 200_000
 save_steps: 100_000
 log_steps: 500
-per_device_train_batch_size: 32
+per_device_train_batch_size: 4
 learning_rate: 0.001
 optim: adamw_torch
 num_samples: 20
