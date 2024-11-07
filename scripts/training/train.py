@@ -52,6 +52,7 @@ from chronos import ChronosConfig, ChronosTokenizer
 from modify_model import CustomT5
 
 # TODO: Implement checking for enough observations in multi-variate mode
+#! Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
 
 
 app = typer.Typer(pretty_exceptions_enable=False)
