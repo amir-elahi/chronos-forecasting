@@ -52,13 +52,6 @@ class CustomT5(T5ForConditionalGeneration):
             # Insert the channel attention layer after the self_attention layer in the list
             encoder_block.layer.insert(1, channel_attention)
 
-    def save_pretrained(self, save_directory):
-
-        os.makedirs(save_directory, exist_ok=True)  # Ensure directory exists
-
-        super().save_pretrained(save_directory)
-        # No custom parameters saved
-
     @classmethod
     def from_pretrained(cls, model_id: str = "amazon/chronos-t5-small", **kwargs):
 

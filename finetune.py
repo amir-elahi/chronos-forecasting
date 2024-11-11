@@ -7,7 +7,7 @@ command = [
     "--config", "./scripts/training/configs/chronos-t5-tiny.yaml",
     "--model-id", "amazon/chronos-t5-tiny",
     "--no-random-init",
-    "--max-steps", "1000",
+    "--max-steps", "10_000",
     "--learning-rate", "0.001"
 ]
 
