@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import h5py
 import torch
+from torch.utils.data import DataLoader
 import torch.distributed as dist
 from torch.utils.data import IterableDataset, get_worker_info, Dataset
 import transformers
@@ -300,7 +301,11 @@ class ChannelDataset(IterableDataset, ShuffleMixin):
 
     def Tensor2dict(self, entry: torch.Tensor) -> dict:
         start = pd.Period("2000-01-01 00:00", freq="h")
-        target = entry[0, :]
+        try:
+            target = entry[0, :]
+        except IndexError:
+            log_on_main(f"entry shape is not OK: {entry.shape}", logger)
+            target = entry
         return {"start": start, "target": target}
 
     def preprocess_entry(self, entry: dict) -> dict:
@@ -716,6 +721,29 @@ class LazyTensorDataset(Dataset):
             yield self.__getitem__(i)
 
 
+# Define a standalone custom data collator function
+def custom_data_collator(features):
+    return features[0]
+
+
+# Override get_train_dataloader with the standalone data collator
+def get_train_dataloader(self) -> DataLoader:
+    if self.train_dataset is None:
+        raise ValueError("Trainer: training requires a train_dataset.")
+
+    train_dataset = self.train_dataset
+
+    dataloader_params = {
+        "batch_size": 1,  # Set to 1 because inputs are already batched
+        "collate_fn": custom_data_collator,
+        "num_workers": self.args.dataloader_num_workers,
+        "pin_memory": self.args.dataloader_pin_memory,
+        "persistent_workers": self.args.dataloader_persistent_workers,
+    }
+
+    return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
+
+
 @app.command()
 @use_yaml_config(param_name="config")
 def main(
@@ -841,9 +869,10 @@ def main(
             "amazon/chronos-t5-large",
         ]
 
+        # !pay attention to the num_channels and batch_size
         model = CustomT5.from_pretrained(
             model_id=model_id,
-            num_channels=per_device_train_batch_size,
+            num_channels=3,
             batch_size=1
         )
 
@@ -923,6 +952,8 @@ def main(
         ddp_find_unused_parameters=False,
         remove_unused_columns=False,
     )
+
+    Trainer.get_train_dataloader = get_train_dataloader
 
     # Create Trainer instance
     trainer = Trainer(

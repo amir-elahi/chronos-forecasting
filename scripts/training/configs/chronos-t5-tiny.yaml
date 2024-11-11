@@ -9,7 +9,7 @@ min_past: 60
 max_steps: 200_000
 save_steps: 100_000
 log_steps: 500
-per_device_train_batch_size: 3
+per_device_train_batch_size: 1
 learning_rate: 0.001
 optim: adamw_torch
 num_samples: 20
@@ -29,6 +29,6 @@ tokenizer_kwargs:
 n_tokens: 4096
 lr_scheduler_type: linear
 warmup_ratio: 0.0
-dataloader_num_workers: 1
+dataloader_num_workers: 0
 max_missing_prop: 0.9
 use_eos_token: true
