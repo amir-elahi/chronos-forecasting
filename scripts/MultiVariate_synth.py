@@ -13,6 +13,7 @@ kernel_synth = importlib.import_module("kernel-synth")
 
 def generate_multiVariate_time_series(
         max_num_operations: int,
+        max_num_kernels: int = 5,
         operations: list[str] = ['+', '*'],
         lr_lambda: float = -2.0,
         hr_lambda: float = 2.0,
@@ -20,7 +21,7 @@ def generate_multiVariate_time_series(
 ):
 
     context = list(
-        kernel_synth.generate_time_series(max_kernels=5) for _ in range(3)
+        kernel_synth.generate_time_series(max_kernels=max_num_kernels) for _ in range(3)
     )
 
     a = context[0]['target']
@@ -73,17 +74,21 @@ def generate_multiVariate_time_series(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-N", "--num-series", type=int, default=1000_000)
+    parser.add_argument("-N", "--num-series", type=int, default=1_000_000)
     parser.add_argument("-O", "--max-num-operations", type=int, default=10)
     parser.add_argument("-L", "--lr_lambda", type=float, default=-2.0)
     parser.add_argument('-H', "--hr_lambda", type=float, default=2.0)
+    parser.add_argument('-NK', "--num_kernels", type=int, default=5)
+    parser.add_argument('--name', type=str, default='MultivariateData')
 
     args = parser.parse_args()
-    path = Path(__file__).parent / "MultivariateData.h5"
+    path = Path(__file__).parent / \
+    f'{args.name}_{args.num_series}_{args.max_num_operations}_{args.num_kernels}.h5'
 
     generated_dataset = Parallel(n_jobs=-1)(
         delayed(generate_multiVariate_time_series)(
             max_num_operations=args.max_num_operations,
+            max_num_kernels=args.num_kernels,
             lr_lambda=args.lr_lambda,
             hr_lambda=args.hr_lambda)
         for _ in tqdm(range(args.num_series))

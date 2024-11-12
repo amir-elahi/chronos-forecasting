@@ -1,5 +1,5 @@
 training_data_paths:
-- "./scripts/MultivariateData.h5"
+- "./scripts/MultivariateData_25000_10_5.h5"
 probability:
 - 1.0
 context_length: 512

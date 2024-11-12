@@ -1,5 +1,5 @@
 import subprocess
-
+# !Do not use this. Use bash script instead!
 # Define the command as a list of arguments
 command = [
     "torchrun", "--nproc-per-node=1",
@@ -8,7 +8,8 @@ command = [
     "--model-id", "amazon/chronos-t5-tiny",
     "--no-random-init",
     "--max-steps", "10_000",
-    "--learning-rate", "0.001"
+    "--learning-rate", "0.001",
+    "--log-steps", "1000",
 ]
 
 # Run the command without output buffering
