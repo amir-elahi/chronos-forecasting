@@ -51,6 +51,7 @@ from chronos import ChronosConfig, ChronosTokenizer
 
 from modify_model import CustomT5
 
+# TODO: Shuffle the ChannelDataset
 # TODO: Implement checking for enough observations in multi-variate mode
 # !Make sure that you change the T5ForConditionalGeneration code before starting the fine-tuning process.
 # !Think about this line of code: probability = probability * len(train_datasets) and check it it is correct.
@@ -876,7 +877,7 @@ def main(
             batch_size=1
         )
 
-        model.require_grad(channel_attention=True, Rest=False)
+        model.require_grad(channel_attention=True, Rest=True)
     else:
         model = load_model(
             model_id=model_id,

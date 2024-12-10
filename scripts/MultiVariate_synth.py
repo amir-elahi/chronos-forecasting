@@ -8,7 +8,7 @@ import argparse
 import h5py
 
 # Dynamically import 'kernel-synth' from the 'scripts' directory
-kernel_synth = importlib.import_module("kernel-synth")
+kernel_synth = importlib.import_module("kernel-synth2")
 
 
 def generate_multiVariate_time_series(
@@ -28,7 +28,7 @@ def generate_multiVariate_time_series(
     b = context[1]['target']
     c = context[2]['target']
 
-    number_of_operations = random.randint(0, max_num_operations)
+    number_of_operations = random.randint(1, max_num_operations)
     operation_list = [random.choice(operations) for _ in range(number_of_operations)]
     lambda_list = [random.uniform(lr_lambda, hr_lambda) for _ in range(number_of_operations)]
 
